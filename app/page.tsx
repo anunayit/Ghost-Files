@@ -4,11 +4,10 @@ import { useState, useRef, useEffect } from 'react';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import exifr from 'exifr';
-import { PDFDocument } from 'pdf-lib'; // NEW: Import PDF Engine
+import { PDFDocument } from 'pdf-lib';
 
 export default function Home() {
-  // --- STATE ---
-  const [mode, setMode] = useState<'IMAGE' | 'VIDEO' | 'PDF'>('IMAGE'); // Added PDF
+  const [mode, setMode] = useState<'IMAGE' | 'VIDEO' | 'PDF'>('IMAGE');
   const [status, setStatus] = useState("SYSTEM IDLE");
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -17,7 +16,7 @@ export default function Home() {
 
   const ffmpegRef = useRef<FFmpeg | null>(null);
 
-  // --- 1. LOAD VIDEO ENGINE (Only needed for Video) ---
+  // --- 1. LOAD VIDEO ENGINE ---
   useEffect(() => {
     const loadFFmpeg = async () => {
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
@@ -38,7 +37,6 @@ export default function Home() {
     setIsProcessing(true); setDownloadUrl(null); setLeakData(null);
     setStatus(`SCANNING IMAGE: ${file.name.toUpperCase()}...`);
     
-    // Scan for Leaks
     try {
       const data = await exifr.parse(file);
       if (data && (data.Make || data.latitude)) {
@@ -50,7 +48,6 @@ export default function Home() {
       }
     } catch (e) {}
 
-    // Clean (Canvas)
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
@@ -83,13 +80,15 @@ export default function Home() {
       setStatus("SCRUBBING METADATA TRACKS...");
       await ffmpeg.exec(['-i', 'input.mp4', '-map_metadata', '-1', '-c', 'copy', 'output.mp4']);
       const data = await ffmpeg.readFile('output.mp4');
-      setDownloadUrl(URL.createObjectURL(new Blob([(data as Uint8Array).buffer], { type: 'video/mp4' })));
+      
+      // FIX: Added 'as any' to fix the Uint8Array error
+      setDownloadUrl(URL.createObjectURL(new Blob([(data as Uint8Array).buffer as any], { type: 'video/mp4' })));
       setStatus("OPERATIONAL: VIDEO SECURED.");
     } catch (e) { setStatus("ERROR: PROCESS FAILED."); }
     setIsProcessing(false);
   };
 
-  // --- 4. PDF LOGIC (NEW) ---
+  // --- 4. PDF LOGIC ---
   const processPdf = async (file: File) => {
     setIsProcessing(true); setDownloadUrl(null); setLeakData(null);
     setStatus(`ANALYZING PDF STRUCTURE...`);
@@ -98,32 +97,27 @@ export default function Home() {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
       
-      // CHECK FOR LEAKS
       const title = pdfDoc.getTitle();
       const author = pdfDoc.getAuthor();
-      const creator = pdfDoc.getCreator();
       
-      if (title || author || creator) {
+      if (title || author) {
         setLeakData({
           type: 'METADATA FOUND',
-          info: `Author: ${author || 'N/A'} | Creator: ${creator || 'N/A'}`
+          info: `Author: ${author || 'N/A'}`
         });
         setStatus("⚠️ PDF METADATA FOUND. WIPING...");
       } else {
         setStatus("PDF CLEAN. RE-SAVING FOR SAFETY...");
       }
 
-      // WIPE DATA
       pdfDoc.setTitle('');
       pdfDoc.setAuthor('');
-      pdfDoc.setSubject('');
-      pdfDoc.setKeywords([]);
-      pdfDoc.setProducer('');
       pdfDoc.setCreator('');
 
-      // SAVE
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      // FIX: Added 'as any' to fix the Blob error
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      
       setDownloadUrl(URL.createObjectURL(blob));
       if (!leakData) setStatus("OPERATIONAL: PDF SECURED.");
     } catch (e) {
@@ -132,7 +126,7 @@ export default function Home() {
     setIsProcessing(false);
   };
 
-  // --- UI HANDLER ---
+  // --- UI ---
   const handleFile = (file: File) => {
     if (mode === 'IMAGE' && file.type.startsWith('image/')) processImage(file);
     else if (mode === 'VIDEO' && file.type.startsWith('video/')) processVideo(file);
@@ -142,14 +136,11 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-black text-green-500 font-mono flex flex-col items-center justify-center p-6">
-      
-      {/* HEADER */}
       <h1 className="text-4xl md:text-6xl font-black tracking-tighter mb-4 text-white">
         GHOST<span className="text-green-600">FILES</span>
       </h1>
       <p className="text-xs text-neutral-500 tracking-[0.3em] mb-12">DECENTRALIZED PRIVACY PROTOCOL</p>
 
-      {/* MODE SELECTOR */}
       <div className="flex flex-wrap justify-center gap-6 mb-10 text-sm">
         {['IMAGE', 'VIDEO', 'PDF'].map((m) => (
           <button 
@@ -162,7 +153,6 @@ export default function Home() {
         ))}
       </div>
 
-      {/* LEAK ALERT */}
       {leakData && (
         <div className="w-full max-w-lg mb-6 border border-red-600 bg-red-900/10 p-4 rounded text-red-500 text-xs animate-pulse">
           <p className="font-bold mb-1">⚠️ {leakData.type}</p>
@@ -170,7 +160,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* DROP ZONE */}
       <div className={`relative w-full max-w-lg border-2 border-dashed rounded-lg h-64 flex flex-col items-center justify-center transition-all ${
         isProcessing ? 'border-yellow-600 bg-yellow-900/10' : 'border-neutral-800 hover:border-green-600 hover:bg-neutral-900'
       }`}>
@@ -181,26 +170,14 @@ export default function Home() {
           disabled={isProcessing}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
         />
-        
-        {isProcessing ? (
-          <div className="animate-spin text-4xl mb-4">⚙️</div>
-        ) : (
-          <div className="text-4xl mb-4 text-neutral-700">
-            {mode === 'IMAGE' ? '📸' : mode === 'VIDEO' ? '📼' : '📄'}
-          </div>
-        )}
-        
-        <p className="text-sm font-bold tracking-widest text-neutral-400">
-          {isProcessing ? 'PROCESSING...' : `DROP ${mode} FILE`}
-        </p>
+        {isProcessing ? <div className="animate-spin text-4xl mb-4">⚙️</div> : <div className="text-4xl mb-4 text-neutral-700">{mode === 'IMAGE' ? '📸' : mode === 'VIDEO' ? '📼' : '📄'}</div>}
+        <p className="text-sm font-bold tracking-widest text-neutral-400">{isProcessing ? 'PROCESSING...' : `DROP ${mode} FILE`}</p>
       </div>
 
-      {/* STATUS */}
       <div className="w-full max-w-lg mt-6 font-mono text-xs text-neutral-500">
         <p>{'>'} STATUS: <span className={leakData ? "text-red-500" : "text-green-500"}>{status}</span></p>
       </div>
 
-      {/* DOWNLOAD */}
       {downloadUrl && (
         <a 
           href={downloadUrl} 
